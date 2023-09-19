@@ -20,10 +20,7 @@ const useChatCompletions = {
   'gpt-3.5-turbo-instruct': false,
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true,
-})
+let openai;
 
 async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, system: string, prompt: string) {
   const possibleMoves = game.moves();
@@ -89,6 +86,19 @@ export default function PlayEngine() {
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [userPrompt, setUserPrompt] = useState(DEFAULT_USER_PROMPT);
   const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    let key = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    if (!key) {
+      key = prompt('Please enter your OpenAI API key (local only):') || '';
+      console.log('key', key);
+    }
+    openai = new OpenAI({
+      organization: 'openai-internal',
+      apiKey: key,
+      dangerouslyAllowBrowser: true,
+    })
+  }, []);
 
   // AutoPlay logic
   const [isAutoPlay, setIsAutoPlay] = useState(false);
