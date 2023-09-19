@@ -20,7 +20,7 @@ const useChatCompletions = {
   'gpt-3.5-turbo-instruct': false,
 }
 
-let openai;
+let openai: OpenAI;
 
 async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, system: string, prompt: string) {
   const possibleMoves = game.moves();
