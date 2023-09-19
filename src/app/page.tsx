@@ -94,7 +94,6 @@ export default function PlayEngine() {
       console.log('key', key);
     }
     openai = new OpenAI({
-      organization: 'openai-internal',
       apiKey: key,
       dangerouslyAllowBrowser: true,
     })
