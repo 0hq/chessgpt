@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import OpenAI from 'openai';
 import { Piece } from "react-chessboard/dist/chessboard/types";
+import Script from 'next/script'
+import { EngineWrapper } from "./stockfish/EngineWrapper"
 
 const DEFAULT_USER_PROMPT = '[Event \"FIDE World Cup 2023\"]\n[Site \"Baku AZE\"]\n[Date \"2023.08.23\"]\n[EventDate \"2021.07.30\"]\n[Round \"8.2\"]\n[Result \"1/2-1/2\"]\n[White \"Magnus Carlsen\"]\n[Black \"Rameshbabu Praggnanandhaa\"]\n[ECO \"C48\"]\n[WhiteElo \"2835\"]\n[BlackElo \"2690\"]\n[PlyCount \"60\"]\n\n'
 const DEFAULT_SYSTEM_PROMPT = 'You are a Chess grandmaster that helps analyze and predict live chess games. Given the algebraic notation for a given match, predict the next move. Do not return anything except for the algebraic notation for your prediction.'
@@ -12,15 +14,29 @@ const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
 
 type CompletionModel = 'gpt-3.5-turbo-instruct' // 'gpt-4-base' -> https://openai.com/careers/
 type ChatModel = 'gpt-4' | 'gpt-3.5-turbo'
-type Model = CompletionModel | ChatModel
+type StockfishModel = 'stockfish-1' | 'stockfish-2' | 'stockfish-3' | 'stockfish-4' | 'stockfish-5' | 'stockfish-6' | 'stockfish-7' | 'stockfish-8' | 'stockfish-9' | 'stockfish-10' | 'stockfish-11' | 'stockfish-12' | 'stockfish-13' | 'stockfish-14' | 'stockfish-15' | 'stockfish-16' | 'stockfish-17' | 'stockfish-18' | 'stockfish-19' | 'stockfish-20'
+type Model = CompletionModel | ChatModel | StockfishModel
 
 const useChatCompletions = {
   'gpt-4': true,
   'gpt-3.5-turbo': true,
-  'gpt-3.5-turbo-instruct': false,
+  'gpt-3.5-turbo-instruct': false
+}
+
+let modelOptions = {
+  'gpt-3.5-turbo-instruct': "GPT-3.5 Turbo Completions",
+  'gpt-4': "GPT-4",
+  'gpt-3.5-turbo': "GPT-3.5 Turbo",
+} as {[K in Model]: string}
+for (let i = 1; i <= 20; i++) {
+  modelOptions[`stockfish-${i}` as StockfishModel] = `Stockfish ${i}`
 }
 
 let openai: OpenAI;
+let stockfishResolve : (e: any) => void;
+const stockfish = new Promise((resolve) => {
+  stockfishResolve = resolve;
+});
 
 async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, system: string, prompt: string) {
   const possibleMoves = game.moves();
@@ -53,7 +69,6 @@ async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, syste
   if (!move) return null
   return move;
 }
-
 
 async function completionsQuery(model: CompletionModel, game: ChessInstance, prompt: string) {
   const possibleMoves = game.moves();
@@ -97,6 +112,8 @@ export default function PlayEngine() {
       apiKey: key,
       dangerouslyAllowBrowser: true,
     })
+
+    //runSelfPlay()
   }, []);
 
   // AutoPlay logic
@@ -124,25 +141,37 @@ export default function PlayEngine() {
     if (!isAutoPlayRef.current) return;
 
     const currentModel = game.turn() === 'w' ? model : model2;
-    const move = useChatCompletions[currentModel]
-      ? await chatCompletionsQuery(currentModel as ChatModel, game, systemPrompt, userPrompt)
-      : await completionsQuery(currentModel as CompletionModel, game, userPrompt);
 
-    if (!move) {
-      if (retryCount < 3) {
-        setRetryCount(retryCount + 1);
-        setTimeout(autoPlay, 200);
-        return
-      } else {
-        setIsAutoPlay(false);
-        setRetryCount(0);
-        return setLastMessage('No/invalid move found by model after 3 retries. AutoPlay stopped.');
-      }
+    if (currentModel.startsWith("stockfish")) {
+      const move = await makeStockfishMove(currentModel);
+      setRetryCount(0);
+      setLastMessage(`Stockfish model suggests move: ${move.to}.`);
+      //movePiece(move); // already done in makeStockfishMove
     }
+    else {
+      const move = useChatCompletions[currentModel]
+          ? await chatCompletionsQuery(currentModel as ChatModel, game, systemPrompt, userPrompt)
+          : await completionsQuery(currentModel as CompletionModel, game, userPrompt);
 
-    setRetryCount(0);
-    setLastMessage(`Model suggests move: ${move}.`);
-    movePiece(move);
+      if (!move) {
+        setRetryCount(prevCount => {
+          const updatedCount = prevCount + 1;
+          console.log("invalid move, retrying...", updatedCount)
+          if (updatedCount < 3) {
+            setTimeout(autoPlay, 200);
+            return updatedCount;
+          } else {
+            setIsAutoPlay(false);
+            setLastMessage('No/invalid move found by model after 3 retries. AutoPlay stopped.');
+            return 0;
+          }
+        });
+        return;
+      }
+      setRetryCount(0);
+      setLastMessage(`Model suggests move: ${move}.`);
+      movePiece(move);
+    }
     setTimeout(autoPlay, 200);
   }
 
@@ -184,16 +213,54 @@ export default function PlayEngine() {
     movePiece(move);
   }
 
+  async function makeStockfishMove(currentModel: StockfishModel = model) {
+    const engine = new EngineWrapper(await stockfish, () => { });
+    // extract int from end of model name
+    if (!currentModel.startsWith("stockfish")) throw new Error('Invalid stockfish model: ' + currentModel)
+    const stockfishLevel = parseInt(currentModel.split('-')[1])
+    await engine.initialize({ Threads: 2, 'Skill Level': stockfishLevel });
+    await engine.initializeGame();
+    const fen = game.fen();
+    engine.send(`position fen ${fen}`);
+    engine.send("isready");
+    await engine.receiveUntil((line) => line === "readyok");
+    engine.send("go movetime 1000");
+    const lines = await engine.receiveUntil((line) =>
+      line.startsWith("bestmove")
+    );
+    const last_line = lines[lines.length - 1];
+    const bestmove = last_line.split(" ")[1];
+    console.log("bestmove:", bestmove);
+
+    const move = {
+      from: bestmove.substr(0, 2),
+      to: bestmove.substr(2, 2),
+      promotion: bestmove.length == 5 ? bestmove.substr(4, 1) : undefined
+    } as ShortMove;
+    movePiece(move);
+    return move;
+  }
+
+  async function makeNextMove() {
+    if (model.startsWith("stockfish")) {
+      return await makeStockfishMove() 
+    }
+    return useChatCompletions[model] ? await makeChatCompletionsMove() : await makeCompletionsMove()
+  }
+
+
   function onDrop(sourceSquare: Square, targetSquare: Square, piece: Piece): boolean {
     const move = movePiece({ from: sourceSquare, to: targetSquare, promotion: "q" });
     if (move === null) return false;
     setIsAutoPlay(false);
-    useChatCompletions[model] ? makeChatCompletionsMove() : makeCompletionsMove();
+    makeNextMove();
     return true;
   }
 
   return (
     <main className="bg-gray-100 min-h-screen p-10">
+      <Script src="./lib/stockfish/stockfish.js" onLoad={async () =>
+        stockfishResolve(await Stockfish())}></Script>
       <div className="mx-auto flex tt:flex-row flex-col space-x-5 justify-between">
         <div className="controls mb-5 flex flex-col space-y-4">
           <h1 className="text-4xl font-bold">ChessGPT</h1>
@@ -204,9 +271,7 @@ export default function PlayEngine() {
               onChange={(e) => setModel(e.target.value as Model)}
               className="border border-gray-300 p-2 rounded-md shadow-sm"
             >
-              <option value="gpt-3.5-turbo-instruct">GPT-3.5 Turbo Completions</option>
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              {Object.entries(modelOptions).map(([model, name]) => <option key={model} value={model}>{name}</option>)}
             </select>
           </div>
           <button
@@ -216,7 +281,7 @@ export default function PlayEngine() {
             Reset Board
           </button>
           <button
-            onClick={() => useChatCompletions[model] ? makeChatCompletionsMove() : makeCompletionsMove()}
+            onClick={makeNextMove}
             className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 active:bg-blue-700 focus:outline-none"
           >
             Force Model to Make Next Move
@@ -242,12 +307,12 @@ export default function PlayEngine() {
           <div className="flex flex-col space-y-1">
             <label className="text-xl font-semibold">Set System Prompt:</label>
             <textarea
-              rows={useChatCompletions[model] ? 5 : 1}
+              rows={(useChatCompletions[model] ?? false) ? 5 : 1}
               placeholder="Enter system prompt here"
               onChange={(e) => setSystemPrompt(e.target.value)}
-              value={useChatCompletions[model] ? DEFAULT_SYSTEM_PROMPT : 'No system prompt for completion models.'}
+              value={(useChatCompletions[model] ?? false) ? DEFAULT_SYSTEM_PROMPT : 'No system prompt for completion models.'}
               className="border border-gray-300 p-2 w-full rounded-md shadow-sm"
-              disabled={!useChatCompletions[model]}
+              disabled={!(useChatCompletions[model] ?? false)}
             />
           </div>
           <div className="flex flex-col space-y-1">
@@ -300,9 +365,7 @@ export default function PlayEngine() {
               onChange={(e) => setModel2(e.target.value as Model)}
               className="border border-gray-300 p-2 rounded-md shadow-sm"
             >
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-              <option value="gpt-3.5-turbo-instruct">GPT-3.5 Turbo Instruct</option>
+              {Object.entries(modelOptions).map(([model, name]) => <option key={model} value={model}>{name}</option>)}
             </select>
           </div>
           <button

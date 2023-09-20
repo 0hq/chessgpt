@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "npm run copy-lib && next dev",
+    "build": "npm run copy-lib && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "copy-lib": "shx rm -rf public/lib/stockfish && shx mkdir -p public/lib/stockfish && shx cp node_modules/stockfish-nnue.wasm/* public/lib/stockfish"
   },
   "dependencies": {
     "@types/node": "20.5.3",
@@ -27,6 +28,8 @@
   },
   "devDependencies": {
     "@types/chess.js": "^0.13.4",
-    "encoding": "^0.1.13"
+    "encoding": "^0.1.13",
+    "shx": "^0.3.4",
+    "stockfish-nnue.wasm": "^1.0.0-1946a675.smolnet"
   }
 }
