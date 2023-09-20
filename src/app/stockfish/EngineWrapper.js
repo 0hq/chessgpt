@@ -26,6 +26,11 @@ export class EngineWrapper {
     this.queue = new Queue();
     this.engine.addMessageListener((line) => this.queue.put(line));
     this.log = log;
+    this._options = {};
+  }
+
+  get options() {
+    return this._options;
   }
 
   send(command) {
@@ -59,6 +64,7 @@ export class EngineWrapper {
     }
     this.send("isready");
     await this.receiveUntil((line) => line === "readyok");
+    this._options = Object.freeze({...options});
   }
 
   async initializeGame() {

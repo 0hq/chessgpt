@@ -12,6 +12,7 @@ const DEFAULT_USER_PROMPT = '[Event \"FIDE World Cup 2023\"]\n[Site \"Baku AZE\"
 const DEFAULT_SYSTEM_PROMPT = 'You are a Chess grandmaster that helps analyze and predict live chess games. Given the algebraic notation for a given match, predict the next move. Do not return anything except for the algebraic notation for your prediction.'
 const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
 const DEFAULT_MODEL_2: Model = 'stockfish-3'
+const STOCKFISH_THREADS = 2
 
 type CompletionModel = 'gpt-3.5-turbo-instruct' // 'gpt-4-base' -> https://openai.com/careers/
 type ChatModel = 'gpt-4' | 'gpt-3.5-turbo'
@@ -36,10 +37,19 @@ for (let i = 1; i <= 20; i++) {
 }
 
 let openai: OpenAI;
+
+// potentially need two engines to support stockfish self-play at different skill levels
+const engines: (EngineWrapper | undefined)[] = [undefined, undefined];
 let stockfishResolve : (e: any) => void;
-const stockfish = new Promise((resolve) => {
+const StockfishConstructor = new Promise<Function>((resolve) => {
   stockfishResolve = resolve;
 });
+
+async function newStockfishEngine() {
+  const create = await StockfishConstructor;
+  console.log('creating new stockfish engine', create)
+  return new EngineWrapper(await create(), () => { })
+}
 
 async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, system: string, prompt: string) {
   const possibleMoves = game.moves();
@@ -141,10 +151,21 @@ export default function PlayEngine() {
   async function autoPlay() {
     if (!isAutoPlayRef.current) return;
 
-    const currentModel = game.turn() === 'w' ? model : model2;
+    if (game.game_over()) {
+      setIsAutoPlay(false);
+      setLastMessage('Game is over. Reset board to play again.')
+      return;
+    }
+
+    // allow more retries for first move because it's more likely to be invalid
+    const retryLimit = game.history().length > 0 ? 3 : 10;
+
+    // if it's white's go, it's black's turn to play
+    const playerToPlay = game.turn() === 'w' ? 0 : 1;
+    const currentModel = playerToPlay == 0 ? model : model2;
 
     if (currentModel.startsWith("stockfish")) {
-      const move = await makeStockfishMove(currentModel as StockfishModel);
+      const move = await makeStockfishMove(currentModel as StockfishModel, playerToPlay);
       setRetryCount(0);
       setLastMessage(`Stockfish model suggests move: ${move.to}.`);
       //movePiece(move); // already done in makeStockfishMove
@@ -158,12 +179,12 @@ export default function PlayEngine() {
         setRetryCount(prevCount => {
           const updatedCount = prevCount + 1;
           console.log("invalid move, retrying...", updatedCount)
-          if (updatedCount < 3) {
+          if (updatedCount < retryLimit) {
             setTimeout(autoPlay, 200);
             return updatedCount;
           } else {
             setIsAutoPlay(false);
-            setLastMessage('No/invalid move found by model after 3 retries. AutoPlay stopped.');
+            setLastMessage(`No/invalid move found by model (${modelOptions[currentModel]}) after ${updatedCount} retries. AutoPlay stopped.`);
             return 0;
           }
         });
@@ -214,13 +235,20 @@ export default function PlayEngine() {
     movePiece(move);
   }
 
-  async function makeStockfishMove(currentModel: StockfishModel = model as StockfishModel) {
-    const engine = new EngineWrapper(await stockfish, () => { });
-    // extract int from end of model name
-    if (!currentModel.startsWith("stockfish")) throw new Error('Invalid stockfish model: ' + currentModel)
-    const stockfishLevel = parseInt(currentModel.split('-')[1])
-    await engine.initialize({ Threads: 2, 'Skill Level': stockfishLevel });
-    await engine.initializeGame();
+  async function makeStockfishMove(currentModel: StockfishModel = model as StockfishModel, playerToPlay: 0 | 1 = 0) {
+    if (!currentModel.startsWith("stockfish")) {
+      throw new Error('Invalid stockfish model: ' + currentModel)
+    }
+    const engine = engines[playerToPlay] = engines[playerToPlay] ?? await newStockfishEngine();
+
+    const stockfishLevel = parseInt(currentModel.split('-')[1]);
+    // @ts-ignore (EngineWrapper.options isn't well typed)
+    const engineLevel = engine.options['Skill Level'] as int;
+    if (stockfishLevel !== engineLevel) {
+      console.log(`Setting stockfish skill level to ${stockfishLevel} for engine ${playerToPlay}. (Was ${engineLevel})`)
+      await engine.initialize({ Threads: STOCKFISH_THREADS, 'Skill Level': stockfishLevel });
+      await engine.initializeGame();
+    }
     const fen = game.fen();
     engine.send(`position fen ${fen}`);
     engine.send("isready");
@@ -243,6 +271,9 @@ export default function PlayEngine() {
   }
 
   async function makeNextMove() {
+    if (game.game_over()) {
+      return setLastMessage('Game is over. Reset board to play again.')
+    }
     if (model.startsWith("stockfish")) {
       return await makeStockfishMove() 
     }
@@ -258,11 +289,35 @@ export default function PlayEngine() {
     return true;
   }
 
+  function describeGameState() {
+    if (game.game_over()) {
+      if (game.in_stalemate()) {
+        return 'Stalemate!';
+      }
+      else if (game.in_draw()) {
+        if (game.in_threefold_repetition()) {
+          return 'Draw! Threefold repetition.';
+        } else if (game.insufficient_material()) {
+          return 'Draw! Insufficient material.';
+        } else {
+          return 'Draw! 50 move rule.';
+        }
+      }
+      else {
+        return `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
+      }
+    }
+    const turn = game.turn() === 'w' ? 'White' : 'Black';
+    const status = game.in_check() ? 'Check. ' : '';
+    return `${status}${turn} to move.`;
+
+  }
+
   return (
     <main className="bg-gray-100 min-h-screen p-10">
       <Script src="./lib/stockfish/stockfish.js" onLoad={async () =>
         // @ts-ignore Stockfish is imported via <Script>
-        stockfishResolve(await Stockfish())}></Script>
+        stockfishResolve(Stockfish)}></Script>
       <div className="mx-auto flex tt:flex-row flex-col space-x-5 justify-between">
         <div className="controls mb-5 flex flex-col space-y-4">
           <h1 className="text-4xl font-bold">ChessGPT<small>+ Stockfish</small></h1>
@@ -356,6 +411,7 @@ export default function PlayEngine() {
 
         </div>
         <div className="basis-[500px] max-w-[600px] max-h-[600px] m-auto rounded-md">
+          <h2 className="text-xl font-semibold text-center mb-4">{describeGameState()}</h2>
           <Chessboard position={game.fen()} onPieceDrop={onDrop} />
         </div>
         <div className="mb-5 p-4 rounded-md shadow-sm border border-gray-300 mt-4">
@@ -379,7 +435,8 @@ export default function PlayEngine() {
           <hr className="my-4" />
           <div className="mb-5 bg-white p-4 rounded-md shadow-sm mt-2">
             <label className="text-md font-semibold">Last message:</label>
-            <p className="mt-2 w-48">{lastMessage || '...'}</p>
+            <p className="mt-2 w-48">{lastMessage || (retryCount ? '' : '...')}</p>
+            {retryCount ? (<p>{`Retrying...${retryCount}`}</p>): undefined}
           </div>
         </div>
       </div>
