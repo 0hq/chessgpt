@@ -14,8 +14,10 @@ const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
 
 type CompletionModel = 'gpt-3.5-turbo-instruct' // 'gpt-4-base' -> https://openai.com/careers/
 type ChatModel = 'gpt-4' | 'gpt-3.5-turbo'
-type StockfishModel = 'stockfish-1' | 'stockfish-2' | 'stockfish-3' | 'stockfish-4' | 'stockfish-5' | 'stockfish-6' | 'stockfish-7' | 'stockfish-8' | 'stockfish-9' | 'stockfish-10' | 'stockfish-11' | 'stockfish-12' | 'stockfish-13' | 'stockfish-14' | 'stockfish-15' | 'stockfish-16' | 'stockfish-17' | 'stockfish-18' | 'stockfish-19' | 'stockfish-20'
-type Model = CompletionModel | ChatModel | StockfishModel
+type LLModel = CompletionModel | ChatModel
+type StockfishModel = `stockfish-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20}`
+
+type Model = LLModel | StockfishModel
 
 const useChatCompletions = {
   'gpt-4': true,
@@ -112,8 +114,6 @@ export default function PlayEngine() {
       apiKey: key,
       dangerouslyAllowBrowser: true,
     })
-
-    //runSelfPlay()
   }, []);
 
   // AutoPlay logic
@@ -143,13 +143,13 @@ export default function PlayEngine() {
     const currentModel = game.turn() === 'w' ? model : model2;
 
     if (currentModel.startsWith("stockfish")) {
-      const move = await makeStockfishMove(currentModel);
+      const move = await makeStockfishMove(currentModel as StockfishModel);
       setRetryCount(0);
       setLastMessage(`Stockfish model suggests move: ${move.to}.`);
       //movePiece(move); // already done in makeStockfishMove
     }
     else {
-      const move = useChatCompletions[currentModel]
+      const move = useChatCompletions[currentModel as LLModel]
           ? await chatCompletionsQuery(currentModel as ChatModel, game, systemPrompt, userPrompt)
           : await completionsQuery(currentModel as CompletionModel, game, userPrompt);
 
@@ -213,7 +213,7 @@ export default function PlayEngine() {
     movePiece(move);
   }
 
-  async function makeStockfishMove(currentModel: StockfishModel = model) {
+  async function makeStockfishMove(currentModel: StockfishModel = model as StockfishModel) {
     const engine = new EngineWrapper(await stockfish, () => { });
     // extract int from end of model name
     if (!currentModel.startsWith("stockfish")) throw new Error('Invalid stockfish model: ' + currentModel)
@@ -223,9 +223,9 @@ export default function PlayEngine() {
     const fen = game.fen();
     engine.send(`position fen ${fen}`);
     engine.send("isready");
-    await engine.receiveUntil((line) => line === "readyok");
+    await engine.receiveUntil((line: string) => line === "readyok");
     engine.send("go movetime 1000");
-    const lines = await engine.receiveUntil((line) =>
+    const lines = await engine.receiveUntil((line: string) =>
       line.startsWith("bestmove")
     );
     const last_line = lines[lines.length - 1];
@@ -245,7 +245,7 @@ export default function PlayEngine() {
     if (model.startsWith("stockfish")) {
       return await makeStockfishMove() 
     }
-    return useChatCompletions[model] ? await makeChatCompletionsMove() : await makeCompletionsMove()
+    return useChatCompletions[model as LLModel] ? await makeChatCompletionsMove() : await makeCompletionsMove()
   }
 
 
@@ -260,6 +260,7 @@ export default function PlayEngine() {
   return (
     <main className="bg-gray-100 min-h-screen p-10">
       <Script src="./lib/stockfish/stockfish.js" onLoad={async () =>
+        // @ts-ignore Stockfish is imported via <Script>
         stockfishResolve(await Stockfish())}></Script>
       <div className="mx-auto flex tt:flex-row flex-col space-x-5 justify-between">
         <div className="controls mb-5 flex flex-col space-y-4">
@@ -307,12 +308,12 @@ export default function PlayEngine() {
           <div className="flex flex-col space-y-1">
             <label className="text-xl font-semibold">Set System Prompt:</label>
             <textarea
-              rows={(useChatCompletions[model] ?? false) ? 5 : 1}
+              rows={(useChatCompletions[model as LLModel] ?? false) ? 5 : 1}
               placeholder="Enter system prompt here"
               onChange={(e) => setSystemPrompt(e.target.value)}
-              value={(useChatCompletions[model] ?? false) ? DEFAULT_SYSTEM_PROMPT : 'No system prompt for completion models.'}
+              value={(useChatCompletions[model as LLModel] ?? false) ? DEFAULT_SYSTEM_PROMPT : 'No system prompt for completion models.'}
               className="border border-gray-300 p-2 w-full rounded-md shadow-sm"
-              disabled={!(useChatCompletions[model] ?? false)}
+              disabled={!(useChatCompletions[model as LLModel] ?? false)}
             />
           </div>
           <div className="flex flex-col space-y-1">
