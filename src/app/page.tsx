@@ -384,6 +384,7 @@ export default function PlayEngine() {
       </div>
       <p className="italic text-gray-500"><a className="underline" href="https://gptchess.vercel.app/">ChessGPT</a> by <a className="underline" href="https://twitter.com/willdepue">will depue</a>. Want to get paid to do research on cutting edge large language models? <a className="underline" href="https://openai.com/careers/">Join OpenAI!</a></p>
       <p className="italic text-gray-500">Stockfish (WASM) added by <a className="underline" href="https://twitter.com/paul_cal">paul_cal</a>, using <a className="underline" href="https://github.com/hi-ogawa/Stockfish">github.com/hi-ogawa/Stockfish</a>.</p>
+      <p className="italic text-gray-500">Full code: <a className="underline" href="https://github.com/paulcalcraft/chessgpt-stockfish">github.com/paulcalcraft/chessgpt-stockfish</a></p>
     </main>
   );
 }
