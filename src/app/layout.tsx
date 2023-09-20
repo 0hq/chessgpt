@@ -5,8 +5,8 @@ import { Manrope } from 'next/font/google'
 const manrope = Manrope({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'ChessGPT',
-  description: 'Play chess against the machine god.',
+  title: 'ChessGPT + Stockfish',
+  description: 'Play chess against both machine gods.',
 }
 
 export default function RootLayout({

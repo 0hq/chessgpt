@@ -263,7 +263,7 @@ export default function PlayEngine() {
         stockfishResolve(await Stockfish())}></Script>
       <div className="mx-auto flex tt:flex-row flex-col space-x-5 justify-between">
         <div className="controls mb-5 flex flex-col space-y-4">
-          <h1 className="text-4xl font-bold">ChessGPT</h1>
+          <h1 className="text-4xl font-bold">ChessGPT<small>+ Stockfish</small></h1>
           <div className="flex items-center space-x-2">
             <label className="text-xl font-semibold">Select Model:</label>
             <select
@@ -377,11 +377,12 @@ export default function PlayEngine() {
           <hr className="my-4" />
           <div className="mb-5 bg-white p-4 rounded-md shadow-sm mt-2">
             <label className="text-md font-semibold">Last message:</label>
-            <p className="mt-2">{lastMessage || '...'}</p>
+            <p className="mt-2 w-48">{lastMessage || '...'}</p>
           </div>
         </div>
       </div>
-      <p className="italic text-gray-500">Want to get paid to do research on cutting edge large language models? <a className="underline" href="https://openai.com/careers/">Join OpenAI!</a></p>
+      <p className="italic text-gray-500"><a className="underline" href="https://gptchess.vercel.app/">ChessGPT</a> by <a className="underline" href="https://twitter.com/willdepue">will depue</a>. Want to get paid to do research on cutting edge large language models? <a className="underline" href="https://openai.com/careers/">Join OpenAI!</a></p>
+      <p className="italic text-gray-500">Stockfish (WASM) added by <a className="underline" href="https://twitter.com/paul_cal">paul_cal</a>, using <a className="underline" href="https://github.com/hi-ogawa/Stockfish">github.com/hi-ogawa/Stockfish</a>.</p>
     </main>
   );
 }
