@@ -11,6 +11,7 @@ import { EngineWrapper } from "./stockfish/EngineWrapper"
 const DEFAULT_USER_PROMPT = '[Event \"FIDE World Cup 2023\"]\n[Site \"Baku AZE\"]\n[Date \"2023.08.23\"]\n[EventDate \"2021.07.30\"]\n[Round \"8.2\"]\n[Result \"1/2-1/2\"]\n[White \"Magnus Carlsen\"]\n[Black \"Rameshbabu Praggnanandhaa\"]\n[ECO \"C48\"]\n[WhiteElo \"2835\"]\n[BlackElo \"2690\"]\n[PlyCount \"60\"]\n\n'
 const DEFAULT_SYSTEM_PROMPT = 'You are a Chess grandmaster that helps analyze and predict live chess games. Given the algebraic notation for a given match, predict the next move. Do not return anything except for the algebraic notation for your prediction.'
 const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
+const DEFAULT_MODEL_2: Model = 'stockfish-3'
 
 type CompletionModel = 'gpt-3.5-turbo-instruct' // 'gpt-4-base' -> https://openai.com/careers/
 type ChatModel = 'gpt-4' | 'gpt-3.5-turbo'
@@ -118,7 +119,7 @@ export default function PlayEngine() {
 
   // AutoPlay logic
   const [isAutoPlay, setIsAutoPlay] = useState(false);
-  const [model2, setModel2] = useState<Model>(DEFAULT_MODEL);
+  const [model2, setModel2] = useState<Model>(DEFAULT_MODEL_2);
   const isAutoPlayRef = useRef(isAutoPlay);
 
   useEffect(() => {
