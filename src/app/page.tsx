@@ -8,7 +8,7 @@ import { Piece } from "react-chessboard/dist/chessboard/types";
 import Script from 'next/script'
 import { EngineWrapper } from "./stockfish/EngineWrapper"
 
-const DEFAULT_USER_PROMPT = '[Event \"FIDE World Cup 2023\"]\n[Site \"Baku AZE\"]\n[Date \"2023.08.23\"]\n[EventDate \"2021.07.30\"]\n[Round \"8.2\"]\n[Result \"1/2-1/2\"]\n[White \"Magnus Carlsen\"]\n[Black \"Rameshbabu Praggnanandhaa\"]\n[ECO \"C48\"]\n[WhiteElo \"2835\"]\n[BlackElo \"2690\"]\n[PlyCount \"60\"]\n\n'
+const DEFAULT_USER_PROMPT = '[Event \"FIDE World Championship Match 2024\"]\n[Site \"Los Angeles, USA\"]\n[Date \"2024.12.01\"]\n[Round \"5\"]\n[White \"Carlsen, Magnus\"]\n[Black \"Nepomniachtchi, Ian\"]\n[Result \"1-0\"]\n[WhiteElo \"2885\"]\n[WhiteTitIe \"GM\"]\n[WhiteFideId \"1503014\"]\n[BlackElo \"2812\"]\n[BIackTitle \"GM\"]\n[BlackFideId \"4168119\"]\n[TimeControl \"40\/7200:20\/3600:900+30\"]\n[UTCDate \"2024.11.27\"]\n[UTCTime \"09:01:25\"]\n[Variant \"Standard\"]\n\n'
 const DEFAULT_SYSTEM_PROMPT = 'You are a Chess grandmaster that helps analyze and predict live chess games. Given the algebraic notation for a given match, predict the next move. Do not return anything except for the algebraic notation for your prediction.'
 const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
 const DEFAULT_MODEL_2: Model = 'stockfish-3'
