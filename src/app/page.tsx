@@ -17,9 +17,10 @@ const STOCKFISH_THREADS = 2
 type CompletionModel = 'gpt-3.5-turbo-instruct' // 'gpt-4-base' -> https://openai.com/careers/
 type ChatModel = 'gpt-4' | 'gpt-3.5-turbo'
 type LLModel = CompletionModel | ChatModel
+type RandomModel = 'random'
 type StockfishModel = `stockfish-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20}`
 
-type Model = LLModel | StockfishModel
+type Model = LLModel | StockfishModel | RandomModel
 
 const useChatCompletions = {
   'gpt-4': true,
@@ -31,6 +32,7 @@ let modelOptions = {
   'gpt-3.5-turbo-instruct': "GPT-3.5 Turbo Completions",
   'gpt-4': "GPT-4",
   'gpt-3.5-turbo': "GPT-3.5 Turbo",
+  "random": "Random moves",
 } as {[K in Model]: string}
 for (let i = 1; i <= 20; i++) {
   modelOptions[`stockfish-${i}` as StockfishModel] = `Stockfish ${i}`
@@ -169,6 +171,9 @@ export default function PlayEngine() {
       setRetryCount(0);
       setLastMessage(`Stockfish model suggests move: ${move.to}.`);
       //movePiece(move); // already done in makeStockfishMove
+    } else if (currentModel == "random") {
+      const move = makeRandomMove(currentModel as RandomModel)
+      setRetryCount(0)
     }
     else {
       const move = useChatCompletions[currentModel as LLModel]
@@ -235,6 +240,14 @@ export default function PlayEngine() {
     movePiece(move);
   }
 
+  function makeRandomMove(model: RandomModel) {
+    const moves = game.moves({ verbose: true })
+    const move = moves[Math.floor(Math.random() * moves.length)]
+    setLastMessage(`Random move: ${move.to}.`);
+    movePiece(move);
+    return move;
+  }
+
   async function makeStockfishMove(currentModel: StockfishModel = model as StockfishModel, playerToPlay: 0 | 1 = 0) {
     if (!currentModel.startsWith("stockfish")) {
       throw new Error('Invalid stockfish model: ' + currentModel)
@@ -276,6 +289,9 @@ export default function PlayEngine() {
     }
     if (model.startsWith("stockfish")) {
       return await makeStockfishMove() 
+    }
+    else if (model == "random") {
+      return makeRandomMove(model as RandomModel)
     }
     return useChatCompletions[model as LLModel] ? await makeChatCompletionsMove() : await makeCompletionsMove()
   }
