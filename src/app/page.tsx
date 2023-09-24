@@ -53,6 +53,36 @@ async function newStockfishEngine() {
   return new EngineWrapper(await create(), () => { })
 }
 
+const experimentalPlans = [
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 1",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-1'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Random 10 then GPT-3.5 Turbo Instruct vs Stockfish 1",
+    modelChoices: (game: ChessInstance) => (game.history().length > 10 ? ['gpt-3.5-turbo-instruct', 'stockfish-1'] : ['random', 'random']) as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Random 20 then GPT-3.5 Turbo Instruct vs Stockfish 1",
+    modelChoices: (game: ChessInstance) => (game.history().length > 20 ? ['gpt-3.5-turbo-instruct', 'stockfish-1'] : ['random', 'random']) as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Random 20 then GPT-3.5 Turbo Instruct",
+    modelChoices: (game: ChessInstance) => [game.history().length > 20 ? 'gpt-3.5-turbo-instruct' : 'random', 'random'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Random 10 GPT-3.5 Turbo Instruct",
+    modelChoices: (game: ChessInstance) => [game.history().length > 15 ? 'gpt-3.5-turbo-instruct' : 'random', 'random'] as [Model, Model],
+    numGames: 10
+  }
+]
+
+let currentExperimentIndex = 0;
+
 async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, system: string, prompt: string) {
   const possibleMoves = game.moves();
   if (game.game_over() || game.in_draw() || possibleMoves.length === 0) return null;
@@ -131,8 +161,12 @@ export default function PlayEngine() {
 
   // AutoPlay logic
   const [isAutoPlay, setIsAutoPlay] = useState(false);
+  const [isExperiments, setIsExperiments] = useState(false);
   const [model2, setModel2] = useState<Model>(DEFAULT_MODEL_2);
   const isAutoPlayRef = useRef(isAutoPlay);
+  const modelRef = useRef(model);
+  const model2Ref = useRef(model2);
+  const gameRef = useRef(game);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
@@ -150,21 +184,100 @@ export default function PlayEngine() {
     isAutoPlayRef.current = isAutoPlay;
   }, [isAutoPlay]);
 
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
+  useEffect(() => {
+    model2Ref.current = model2;
+  }, [model2]);
+
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
   async function autoPlay() {
+    console.log("autoplay pre ref")
     if (!isAutoPlayRef.current) return;
 
-    if (game.game_over()) {
-      setIsAutoPlay(false);
-      setLastMessage('Game is over. Reset board to play again.')
+    if (gameRef.current.game_over()) {
+      if (isExperiments) {
+        // store result
+        const plan = experimentalPlans[currentExperimentIndex];
+        const gameSummary = {
+          pgn: gameRef.current.pgn(),
+          state_description: describeGameState(),
+          winner: gameRef.current.in_draw() ? 'draw' : gameRef.current.turn() === 'w' ? 'black' : 'white',
+        };
+        console.log(`Game ${plan.games.length + 1} of ${plan.numGames} completed. Result: ${gameSummary.winner} with ${gameSummary.state_description}`)
+        console.log("gameRef.current summary", gameSummary)
+        plan.games.push(gameSummary)
+        console.log("plan.games", plan.games)
+        if (plan.games.length == plan.numGames) {
+          plan.completed = true;
+          currentExperimentIndex++;
+          console.log("completed " + plan.name, plan)
+          const whiteWins = plan.games.filter(game => game.winner == 'white').length;
+          const draws = plan.games.filter(game => game.winner == 'draw').length;
+          const blackWins = plan.games.filter(game => game.winner == 'black').length;
+          plan.result = {
+            whiteWins,
+            draws,
+            blackWins,
+            summary: `White wins: ${whiteWins}, draws: ${draws}, black wins: ${blackWins}`
+          }
+          console.log(`Completed ${plan.name}! Results: ${plan.result.summary}`)
+          alert(`Completed ${plan.name}! Results: ${plan.result.summary}`)
+        }
+        console.log("experimentalPlans", experimentalPlans)
+        if (plan) {
+          console.log(`Starting experiment: ${plan.name}`)
+          const newGame = resetBoard();
+          //setIsAutoPlay(true);
+          setTimeout(autoPlay, 200);
+          return;
+        } else {
+          console.log('All experiments completed.')
+      }
+
       return;
     }
+    else {
+        setIsAutoPlay(false);
+        setLastMessage('Game is over. Reset board to play again.')
+        return;
+    }
+  }
+
+
+  if (isExperiments) {
+    const plan = experimentalPlans[currentExperimentIndex];
+    if (!plan) {
+      console.log('All experiments completed.')
+      setIsExperiments(false);
+      return;
+    }
+    if (!plan.games) {
+      plan.games = [];
+    }
+    const [newModel, newModel2] = plan.modelChoices(gameRef.current);
+    console.log("previousModel", model, model2)
+    console.log("newModel", newModel, newModel2)
+    if (newModel != modelRef.current || newModel2 != model2Ref.current) {
+      setModel(newModel);
+      setModel2(newModel2);
+
+      setTimeout(autoPlay, 200);
+      return;
+    }
+  }
 
     // allow more retries for first move because it's more likely to be invalid
-    const retryLimit = game.history().length > 0 ? 3 : 10;
+    const retryLimit = gameRef.current.history().length > 0 ? 3 : 10;
 
     // if it's white's go, it's black's turn to play
-    const playerToPlay = game.turn() === 'w' ? 0 : 1;
-    const currentModel = playerToPlay == 0 ? model : model2;
+    const playerToPlay = gameRef.current.turn() === 'w' ? 0 : 1;
+    const currentModel = playerToPlay == 0 ? modelRef.current : model2Ref.current;
 
     if (currentModel.startsWith("stockfish")) {
       const move = await makeStockfishMove(currentModel as StockfishModel, playerToPlay);
@@ -177,8 +290,8 @@ export default function PlayEngine() {
     }
     else {
       const move = useChatCompletions[currentModel as LLModel]
-          ? await chatCompletionsQuery(currentModel as ChatModel, game, systemPrompt, userPrompt)
-          : await completionsQuery(currentModel as CompletionModel, game, userPrompt);
+          ? await chatCompletionsQuery(currentModel as ChatModel, gameRef.current, systemPrompt, userPrompt)
+          : await completionsQuery(currentModel as CompletionModel, gameRef.current, userPrompt);
 
       if (!move) {
         setRetryCount(prevCount => {
@@ -203,12 +316,14 @@ export default function PlayEngine() {
   }
 
   function resetBoard() {
-    setGame(new Chess());
+    const newGame = new Chess();
+    setGame(newGame);
     setLastMessage("");
+    return newGame;
   }
 
   function setGameStateFromPGN(pgn: string) {
-    const gameCopy = { ...game };
+    const gameCopy = { ...gameRef.current };
     const isLoaded = gameCopy.load_pgn(pgn);
     if (!isLoaded) {
       console.error('Invalid PGN provided');
@@ -220,28 +335,28 @@ export default function PlayEngine() {
   }
 
   function movePiece(move: ShortMove | string) {
-    const gameCopy = { ...game };
+    const gameCopy = { ...gameRef.current };
     const result = gameCopy.move(move);
     setGame(gameCopy);
     return result;
   }
 
   async function makeChatCompletionsMove() {
-    const move = await chatCompletionsQuery(model as ChatModel, game, systemPrompt, userPrompt);
+    const move = await chatCompletionsQuery(model as ChatModel, gameRef.current, systemPrompt, userPrompt);
     if (!move) return setLastMessage('No/invalid move found by model. Try again by clicking button above.');
     setLastMessage(`Model suggests move: ${move}.`);
     movePiece(move);
   }
 
   async function makeCompletionsMove() {
-    const move = await completionsQuery(model as CompletionModel, game, userPrompt);
+    const move = await completionsQuery(model as CompletionModel, gameRef.current, userPrompt);
     if (!move) return setLastMessage('No/invalid move found by model. Try again by clicking button above.');
     setLastMessage(`Model suggests move: ${move}.`);
     movePiece(move);
   }
 
   function makeRandomMove(model: RandomModel) {
-    const moves = game.moves({ verbose: true })
+    const moves = gameRef.current.moves({ verbose: true })
     const move = moves[Math.floor(Math.random() * moves.length)]
     setLastMessage(`Random move: ${move.to}.`);
     movePiece(move);
@@ -262,7 +377,7 @@ export default function PlayEngine() {
       await engine.initialize({ Threads: STOCKFISH_THREADS, 'Skill Level': stockfishLevel });
       await engine.initializeGame();
     }
-    const fen = game.fen();
+    const fen = gameRef.current.fen();
     engine.send(`position fen ${fen}`);
     engine.send("isready");
     await engine.receiveUntil((line: string) => line === "readyok");
@@ -284,7 +399,7 @@ export default function PlayEngine() {
   }
 
   async function makeNextMove() {
-    if (game.game_over()) {
+    if (gameRef.current.game_over()) {
       return setLastMessage('Game is over. Reset board to play again.')
     }
     if (model.startsWith("stockfish")) {
@@ -306,27 +421,26 @@ export default function PlayEngine() {
   }
 
   function describeGameState() {
-    if (game.game_over()) {
-      if (game.in_stalemate()) {
+    if (gameRef.current.game_over()) {
+      if (gameRef.current.in_stalemate()) {
         return 'Stalemate!';
       }
-      else if (game.in_draw()) {
-        if (game.in_threefold_repetition()) {
+      else if (gameRef.current.in_draw()) {
+        if (gameRef.current.in_threefold_repetition()) {
           return 'Draw! Threefold repetition.';
-        } else if (game.insufficient_material()) {
+        } else if (gameRef.current.insufficient_material()) {
           return 'Draw! Insufficient material.';
         } else {
           return 'Draw! 50 move rule.';
         }
       }
       else {
-        return `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
+        return `Checkmate! ${gameRef.current.turn() === 'w' ? 'Black' : 'White'} wins!`;
       }
     }
-    const turn = game.turn() === 'w' ? 'White' : 'Black';
-    const status = game.in_check() ? 'Check. ' : '';
+    const turn = gameRef.current.turn() === 'w' ? 'White' : 'Black';
+    const status = gameRef.current.in_check() ? 'Check. ' : '';
     return `${status}${turn} to move.`;
-
   }
 
   return (
@@ -404,7 +518,7 @@ export default function PlayEngine() {
               <button
                 id="copyButton"
                 onClick={() => {
-                  navigator.clipboard.writeText(game.pgn() || '1. ');
+                  navigator.clipboard.writeText(gameRef.current.pgn() || '1. ');
                   let copyButton = document.getElementById("copyButton");
                   if (copyButton) {
                     copyButton.innerText = "Copied!";
@@ -420,7 +534,7 @@ export default function PlayEngine() {
             </div>
             <div className="flex items-center space-x-2 max-w-[380px]">
               <p className="border border-gray-300 p-2 w-full rounded-md shadow-sm">
-                {game.pgn() || '1. '}
+                {gameRef.current.pgn() || '1. '}
               </p>
             </div>
           </div>
@@ -428,7 +542,7 @@ export default function PlayEngine() {
         </div>
         <div className="basis-[500px] max-w-[600px] max-h-[600px] m-auto rounded-md">
           <h2 className="text-xl font-semibold text-center mb-4">{describeGameState()}</h2>
-          <Chessboard position={game.fen()} onPieceDrop={onDrop} />
+          <Chessboard position={gameRef.current.fen()} onPieceDrop={onDrop} />
         </div>
         <div className="mb-5 p-4 rounded-md shadow-sm border border-gray-300 mt-4">
           <h2 className="text-xl font-semibold">Auto Play</h2>
@@ -447,6 +561,12 @@ export default function PlayEngine() {
             className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 active:bg-blue-700 focus:outline-none mt-3"
           >
             {isAutoPlay ? 'Stop Auto Play' : 'Start Auto Play'}
+          </button>
+          <button
+            onClick={() => setIsExperiments(!isExperiments)}
+            className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 active:bg-blue-700 focus:outline-none mt-3"
+          >
+            {isExperiments ? 'Stop Experiments' : 'Start Experiments'}
           </button>
           <hr className="my-4" />
           <div className="mb-5 bg-white p-4 rounded-md shadow-sm mt-2">
