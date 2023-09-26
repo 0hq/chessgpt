@@ -8,7 +8,7 @@ import { Piece } from "react-chessboard/dist/chessboard/types";
 import Script from 'next/script'
 import { EngineWrapper } from "./stockfish/EngineWrapper"
 
-const DEFAULT_USER_PROMPT = '[Event \"FIDE World Championship Match 2024\"]\n[Site \"Los Angeles, USA\"]\n[Date \"2024.12.01\"]\n[Round \"5\"]\n[White \"Carlsen, Magnus\"]\n[Black \"Nepomniachtchi, Ian\"]\n[Result \"1-0\"]\n[WhiteElo \"2885\"]\n[WhiteTitIe \"GM\"]\n[WhiteFideId \"1503014\"]\n[BlackElo \"2812\"]\n[BIackTitle \"GM\"]\n[BlackFideId \"4168119\"]\n[TimeControl \"40\/7200:20\/3600:900+30\"]\n[UTCDate \"2024.11.27\"]\n[UTCTime \"09:01:25\"]\n[Variant \"Standard\"]\n\n'
+const DEFAULT_USER_PROMPT = '[Event \"FIDE World Championship Match 2024\"]\n[Site \"Los Angeles, USA\"]\n[Date \"2024.12.01\"]\n[Round \"5\"]\n[White \"Carlsen, Magnus\"]\n[Black \"Nepomniachtchi, Ian\"]\n[Result \"1-0\"]\n[WhiteElo \"2885\"]\n[WhiteTitle \"GM\"]\n[WhiteFideId \"1503014\"]\n[BlackElo \"2812\"]\n[BlackTitle \"GM\"]\n[BlackFideId \"4168119\"]\n[TimeControl \"40\/7200:20\/3600:900+30\"]\n[UTCDate \"2024.11.27\"]\n[UTCTime \"09:01:25\"]\n[Variant \"Standard\"]\n\n'
 const DEFAULT_SYSTEM_PROMPT = 'You are a Chess grandmaster that helps analyze and predict live chess games. Given the algebraic notation for a given match, predict the next move. Do not return anything except for the algebraic notation for your prediction.'
 const DEFAULT_MODEL: Model = 'gpt-3.5-turbo-instruct'
 const DEFAULT_MODEL_2: Model = 'stockfish-3'
@@ -42,10 +42,13 @@ let openai: OpenAI;
 
 // potentially need two engines to support stockfish self-play at different skill levels
 const engines: (EngineWrapper | undefined)[] = [undefined, undefined];
+let evalEngine : EngineWrapper;
 let stockfishResolve : (e: any) => void;
 const StockfishConstructor = new Promise<Function>((resolve) => {
   stockfishResolve = resolve;
 });
+
+// lichess levels: https://github.com/lichess-org/fishnet/blob/2102b272f6db304ddcc0a72acb7621b589cee209/src/api.rs#L250
 
 async function newStockfishEngine() {
   const create = await StockfishConstructor;
@@ -53,10 +56,54 @@ async function newStockfishEngine() {
   return new EngineWrapper(await create(), () => { })
 }
 
+// experimental mode only shows in NODE_ENV=development
+// note temp is hard coded in completions call
+// movetime and depth for stockfish are hardcoded in makeStockfishMove
+// where I've used different names for plans here, that's when I was running these plans in previous code configs
 const experimentalPlans = [
   {
-    name: "GPT-3.5 Turbo Instruct vs Stockfish 1",
-    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-1'] as [Model, Model],
+    name: "Stockfish 1 vs. Random 10, then GPT-3.5 Turbo Instruct vs Random. temp  0",
+    modelChoices: (game: ChessInstance) => (game.history().length < 10 ? ['stockfish-1', 'random'] : ['gpt-3.5-turbo-instruct', 'random']) as [Model, Model],
+    numGames: 50
+  },
+  {
+    name: "Random 10 then GPT-3.5 Turbo Instruct vs itself",
+    modelChoices: (game: ChessInstance) => (game.history().length > 10 ? ['gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct'] : ['random', 'random']) as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Random 20 then GPT-3.5 Turbo Instruct vs itself",
+    modelChoices: (game: ChessInstance) => (game.history().length > 20 ? ['gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct'] : ['random', 'random']) as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 7, go movetime 300 depth 5 (lichess level 5)",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-7'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 3, go movetime 200 depth 5 (lichess level 4)",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-3'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "Stockfish 3 vs. GPT-3.5 Turbo Instruct",
+    modelChoices: (game: ChessInstance) => ['stockfish-3', 'gpt-3.5-turbo-instruct'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 2",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-2'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 4",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-4'] as [Model, Model],
+    numGames: 10
+  },
+  {
+    name: "GPT-3.5 Turbo Instruct vs Stockfish 8",
+    modelChoices: (game: ChessInstance) => ['gpt-3.5-turbo-instruct', 'stockfish-8'] as [Model, Model],
     numGames: 10
   },
   {
@@ -79,7 +126,7 @@ const experimentalPlans = [
     modelChoices: (game: ChessInstance) => [game.history().length > 15 ? 'gpt-3.5-turbo-instruct' : 'random', 'random'] as [Model, Model],
     numGames: 10
   }
-]
+] as any[];
 
 let currentExperimentIndex = 0;
 
@@ -99,16 +146,17 @@ async function chatCompletionsQuery(model: ChatModel, game: ChessInstance, syste
         "content": prompt + game.pgn() || '1. '
       }
     ],
-    temperature: 1,
+    temperature: 0,
+    // temperature: 1,
     max_tokens: 10,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0,
+    // top_p: 1,
+    // frequency_penalty: 0,
+    // presence_penalty: 0,
   });
 
   const response_content = response.choices[0].message.content;
   if (!response_content) throw new Error('No choice found');
-  let choice = response_content.trim().split(' ').filter(item => !item.includes('.'))[0]
+  let choice = response_content.trim().split(/\s+/).filter(item => !item.includes('.'))[0]
   const move = possibleMoves.find((move) => move === choice);
   console.log(`Moves: ${possibleMoves}, choice: ${choice}, raw: ${response_content}, found_move: ${move}`)
   if (!move) return null
@@ -124,14 +172,14 @@ async function completionsQuery(model: CompletionModel, game: ChessInstance, pro
   const completion = await openai.completions.create({
     prompt: prompt + game.pgn() || '1. ',
     model: model,
-    temperature: 1,
+    temperature: 0,
     max_tokens: 10,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0,
+    // top_p: 1,
+    // frequency_penalty: 0,
+    // presence_penalty: 0,
   });
   const response_content = completion.choices[0].text
-  let choice = response_content.trim().split(' ').filter(item => !item.includes('.'))[0]
+  let choice = response_content.trim().split(/\s+/).filter(item => !item.includes('.'))[0]
   const move = possibleMoves.find((move) => move === choice);
   console.log(`Moves: ${possibleMoves}, choice: ${choice}, raw: ${response_content}, found_move: ${move}`)
   if (!move) return null
@@ -146,6 +194,7 @@ export default function PlayEngine() {
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [userPrompt, setUserPrompt] = useState(DEFAULT_USER_PROMPT);
   const [retryCount, setRetryCount] = useState(0);
+  const [score, setScore] = useState(0);
 
   useEffect(() => {
     let key = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
@@ -158,6 +207,9 @@ export default function PlayEngine() {
       dangerouslyAllowBrowser: true,
     })
   }, []);
+
+  // If you're looking at this useRef and useEffect code and thinking "what the hell is going on here?":
+  // I get you. React is not my day job. I'm just adapting something open source to get it working.
 
   // AutoPlay logic
   const [isAutoPlay, setIsAutoPlay] = useState(false);
@@ -196,6 +248,33 @@ export default function PlayEngine() {
     gameRef.current = game;
   }, [game]);
 
+  async function refreshEval(game: ChessInstance = gameRef.current) {
+    if (!evalEngine) {
+      evalEngine = await newStockfishEngine();
+      await evalEngine.initialize({ Threads: STOCKFISH_THREADS });
+      await evalEngine.initializeGame();
+    }
+    const fen = game.fen();
+    evalEngine.send(`position fen ${fen}`);
+    evalEngine.send("isready");
+    await evalEngine.receiveUntil((line: string) => line === "readyok");
+    evalEngine.send("go movetime 100");
+    const lines = await evalEngine.receiveUntil((line: string) =>
+      line.startsWith("bestmove")
+    );
+    const last_line = lines.filter((line: string) =>
+      /info .* score cp/.test(line)).slice(-1)[0]
+    console.log("last score line", last_line)
+
+    const scoreText = /score cp (-?\d+)/.exec(last_line)?.[1] ?? '0';
+    let score = parseInt(scoreText) / 100
+    if (game.turn() === 'b') {
+      score = -score
+      // always show white's score
+    }
+    setScore(score);
+  }
+
   async function autoPlay() {
     console.log("autoplay pre ref")
     if (!isAutoPlayRef.current) return;
@@ -203,31 +282,38 @@ export default function PlayEngine() {
     if (gameRef.current.game_over()) {
       if (isExperiments) {
         // store result
-        const plan = experimentalPlans[currentExperimentIndex];
-        const gameSummary = {
-          pgn: gameRef.current.pgn(),
-          state_description: describeGameState(),
-          winner: gameRef.current.in_draw() ? 'draw' : gameRef.current.turn() === 'w' ? 'black' : 'white',
-        };
-        console.log(`Game ${plan.games.length + 1} of ${plan.numGames} completed. Result: ${gameSummary.winner} with ${gameSummary.state_description}`)
-        console.log("gameRef.current summary", gameSummary)
-        plan.games.push(gameSummary)
-        console.log("plan.games", plan.games)
-        if (plan.games.length == plan.numGames) {
-          plan.completed = true;
-          currentExperimentIndex++;
-          console.log("completed " + plan.name, plan)
-          const whiteWins = plan.games.filter(game => game.winner == 'white').length;
-          const draws = plan.games.filter(game => game.winner == 'draw').length;
-          const blackWins = plan.games.filter(game => game.winner == 'black').length;
-          plan.result = {
-            whiteWins,
-            draws,
-            blackWins,
-            summary: `White wins: ${whiteWins}, draws: ${draws}, black wins: ${blackWins}`
+        let plan = experimentalPlans[currentExperimentIndex];
+        if (plan.games) {
+          // the currently ended game was (probably) part of our experiment
+          const gameSummary = {
+            pgn: gameRef.current.pgn(),
+            state_description: describeGameState(),
+            winner: gameRef.current.in_draw() ? 'draw' : gameRef.current.turn() === 'w' ? 'black' : 'white',
+          };
+          console.log(`Game ${plan.games.length + 1} of ${plan.numGames} completed. Result: ${gameSummary.winner} with ${gameSummary.state_description}`)
+          console.log("gameRef.current summary", gameSummary)
+          plan.games.push(gameSummary)
+          console.log("plan.games", plan.games)
+          if (plan.games.length == plan.numGames) {
+            plan.completed = true;
+            console.log("completed " + plan.name, plan)
+            const whiteWins = plan.games.filter((game : any) => game.winner == 'white').length;
+            const draws = plan.games.filter((game: any) => game.winner == 'draw').length;
+            const blackWins = plan.games.filter((game: any) => game.winner == 'black').length;
+            plan.result = {
+              whiteWins,
+              draws,
+              blackWins,
+              summary: `White wins: ${whiteWins}, draws: ${draws}, black wins: ${blackWins}`
+            }
+            console.log(`Completed ${plan.name}! Results: ${plan.result.summary}`)
+            alert(`Completed ${plan.name}! Results: ${plan.result.summary}`)
+
+            currentExperimentIndex++;
+            plan = experimentalPlans[currentExperimentIndex];
           }
-          console.log(`Completed ${plan.name}! Results: ${plan.result.summary}`)
-          alert(`Completed ${plan.name}! Results: ${plan.result.summary}`)
+          // pause for 2 seconds at end of game
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
         console.log("experimentalPlans", experimentalPlans)
         if (plan) {
@@ -319,6 +405,7 @@ export default function PlayEngine() {
     const newGame = new Chess();
     setGame(newGame);
     setLastMessage("");
+    refreshEval(newGame)
     return newGame;
   }
 
@@ -338,6 +425,7 @@ export default function PlayEngine() {
     const gameCopy = { ...gameRef.current };
     const result = gameCopy.move(move);
     setGame(gameCopy);
+    refreshEval(gameCopy)
     return result;
   }
 
@@ -381,13 +469,14 @@ export default function PlayEngine() {
     engine.send(`position fen ${fen}`);
     engine.send("isready");
     await engine.receiveUntil((line: string) => line === "readyok");
-    engine.send("go movetime 1000");
+    engine.send("go movetime 300 depth 5");
     const lines = await engine.receiveUntil((line: string) =>
       line.startsWith("bestmove")
     );
     const last_line = lines[lines.length - 1];
     const bestmove = last_line.split(" ")[1];
     console.log("bestmove:", bestmove);
+    console.log("info lines", lines.filter(line => line.startsWith("info")));
 
     const move = {
       from: bestmove.substr(0, 2),
@@ -460,6 +549,7 @@ export default function PlayEngine() {
             >
               {Object.entries(modelOptions).map(([model, name]) => <option key={model} value={model}>{name}</option>)}
             </select>
+            <p>Temperature: 0</p>
           </div>
           <button
             onClick={resetBoard}
@@ -473,6 +563,32 @@ export default function PlayEngine() {
           >
             Force Model to Make Next Move
           </button>
+          <div className="flex flex-col space-y-1">
+            <div className="flex justify-between">
+              <label className="text-xl font-semibold">Current PGN:</label>
+              <button
+                id="copyButton"
+                onClick={() => {
+                  navigator.clipboard.writeText(gameRef.current.pgn() || '1. ');
+                  let copyButton = document.getElementById("copyButton");
+                  if (copyButton) {
+                    copyButton.innerText = "Copied!";
+                    setTimeout(() => {
+                      if (copyButton) copyButton.innerText = "Copy PGN";
+                    }, 2000);
+                  }
+                }}
+                className="text-slate-500 py-1 px-2 rounded-md hover:text-slate-700 active:text-slate-800 focus:outline-none"
+              >
+                Copy PGN
+              </button>
+            </div>
+            <div className="flex items-center space-x-2 max-w-[380px]">
+              <p className="border border-gray-300 p-2 w-full rounded-md shadow-sm">
+                {gameRef.current.pgn() || '1. '}
+              </p>
+            </div>
+          </div>
           <div className="flex flex-col space-y-1">
             <label className="text-xl font-semibold">Set PGN:</label>
             <div className="flex items-center space-x-2">
@@ -512,36 +628,12 @@ export default function PlayEngine() {
               className="border border-gray-300 p-2 w-full rounded-md shadow-sm"
             />
           </div>
-          <div className="flex flex-col space-y-1">
-            <div className="flex justify-between">
-              <label className="text-xl font-semibold">Current PGN:</label>
-              <button
-                id="copyButton"
-                onClick={() => {
-                  navigator.clipboard.writeText(gameRef.current.pgn() || '1. ');
-                  let copyButton = document.getElementById("copyButton");
-                  if (copyButton) {
-                    copyButton.innerText = "Copied!";
-                    setTimeout(() => {
-                      if (copyButton) copyButton.innerText = "Copy PGN";
-                    }, 2000);
-                  }
-                }}
-                className="text-slate-500 py-1 px-2 rounded-md hover:text-slate-700 active:text-slate-800 focus:outline-none"
-              >
-                Copy PGN
-              </button>
-            </div>
-            <div className="flex items-center space-x-2 max-w-[380px]">
-              <p className="border border-gray-300 p-2 w-full rounded-md shadow-sm">
-                {gameRef.current.pgn() || '1. '}
-              </p>
-            </div>
-          </div>
 
         </div>
-        <div className="basis-[500px] max-w-[600px] max-h-[600px] m-auto rounded-md">
+        <div className="basis-[500px] max-w-[600px] max-h-[600px] mx-auto rounded-md">
           <h2 className="text-xl font-semibold text-center mb-4">{describeGameState()}</h2>
+          <p className="text-center mb-4">Evaluation of current position</p>
+          <h2 className="text-xl font-semibold text-center mb-4">{score > 0 ? "⬜ +" : score == 0 ? "" : "◼️ "}{score || "."}</h2>
           <Chessboard position={gameRef.current.fen()} onPieceDrop={onDrop} />
         </div>
         <div className="mb-5 p-4 rounded-md shadow-sm border border-gray-300 mt-4">
@@ -562,12 +654,13 @@ export default function PlayEngine() {
           >
             {isAutoPlay ? 'Stop Auto Play' : 'Start Auto Play'}
           </button>
+          {process.env.NODE_ENV == "development" &&
           <button
             onClick={() => setIsExperiments(!isExperiments)}
             className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 active:bg-blue-700 focus:outline-none mt-3"
           >
             {isExperiments ? 'Stop Experiments' : 'Start Experiments'}
-          </button>
+            </button>}
           <hr className="my-4" />
           <div className="mb-5 bg-white p-4 rounded-md shadow-sm mt-2">
             <label className="text-md font-semibold">Last message:</label>
